@@ -1,0 +1,352 @@
+
+import React, { useState, useEffect } from "react";
+import { Stage, Layer, Rect, Text, Line } from "react-konva";
+import { pack } from "efficient-rect-packer";
+
+export default function PanelCuttingOptimizer() {
+  const [panels, setPanels] = useState([]);
+  const [stockSheet, setStockSheet] = useState({ w: 96, h: 48 });
+  const [result, setResult] = useState(null);
+  const [hoveredPanel, setHoveredPanel] = useState(null);
+  const [newPanel, setNewPanel] = useState({ name: "", qty: 1, w: 12, h: 12 });
+  const [units] = useState("inch");
+  const [error, setError] = useState("");
+  const [cuttingOptions, setCuttingOptions] = useState({
+    kerf: 0.125,
+    respectGrain: false,
+    showDimensions: true,
+  });
+  const [statistics, setStatistics] = useState(null);
+  const [gcode, setGcode] = useState("");
+
+  const SCALE = 5;
+  const PADDING = 40;
+
+  useEffect(() => {
+    if (panels.length > 0) {
+      handleOptimize();
+    } else {
+      setResult(null);
+      setStatistics(null);
+    }
+  }, [panels, stockSheet, cuttingOptions]);
+
+  const handleAddPanel = () => {
+    if (!newPanel.name.trim()) return setError("Panel name required");
+    if (newPanel.qty < 1) return setError("Minimum 1 quantity");
+    if (newPanel.w <= 0 || newPanel.h <= 0) return setError("Panel size > 0");
+    if (newPanel.w > stockSheet.w || newPanel.h > stockSheet.h)
+      return setError("Panel cannot exceed stock size");
+
+    setError("");
+    setPanels([...panels, { ...newPanel, id: Date.now().toString() }]);
+    setNewPanel({ name: "", qty: 1, w: 12, h: 12 });
+  };
+
+  const handleRemovePanel = (id) => {
+    const updated = panels.filter((p) => p.id !== id);
+    setPanels(updated);
+  };
+
+  const handleOptimize = async () => {
+    const unitToMM = 25.4;
+    const toMM = (v) => v * unitToMM;
+    const expandedPanels = panels.flatMap((panel) =>
+      Array.from({ length: panel.qty }, (_, index) => ({
+        id: `${panel.name}-${index}`,
+        name: panel.name,
+        w: toMM(panel.w),
+        h: toMM(panel.h),
+      }))
+    );
+    const container = {
+      w: toMM(stockSheet.w),
+      h: toMM(stockSheet.h),
+    };
+
+    const packingResult = await pack(expandedPanels, container, {
+      padding: toMM(cuttingOptions.kerf),
+      noRotation: cuttingOptions.respectGrain,
+    });
+
+    const resultInInches = {
+      ...packingResult,
+      packed_rectangles: packingResult.packed_rectangles.map((rect) => ({
+        ...rect,
+        x: rect.x / unitToMM,
+        y: rect.y / unitToMM,
+        w: rect.w / unitToMM,
+        h: rect.h / unitToMM,
+      })),
+    };
+
+    setResult(resultInInches);
+
+    const totalArea = stockSheet.w * stockSheet.h;
+    const usedArea = resultInInches.packed_rectangles.reduce(
+      (sum, rect) => sum + rect.w * rect.h,
+      0
+    );
+    const wasteArea = totalArea - usedArea;
+    const wastePercentage = (wasteArea / totalArea) * 100;
+    const totalCuts = resultInInches.packed_rectangles.length * 4;
+
+    setStatistics({
+      totalArea: totalArea.toFixed(2),
+      usedArea: usedArea.toFixed(2),
+      wasteArea: wasteArea.toFixed(2),
+      wastePercentage: wastePercentage.toFixed(2),
+      totalPanels: resultInInches.packed_rectangles.length,
+      unplacedPanels:
+        expandedPanels.length - resultInInches.packed_rectangles.length,
+      totalCuts,
+      efficiency: (100 - wastePercentage).toFixed(2),
+    });
+
+    generateGcode(resultInInches.packed_rectangles);
+  };
+
+  const generateGcode = (rects) => {
+    const toMM = (v) => (v * 25.4).toFixed(2);
+    let code = `; Panel Cutting G-code\nG21 ; mm\nG90 ; abs pos\n`;
+    rects.forEach((rect, i) => {
+      const x = toMM(rect.x);
+      const y = toMM(rect.y);
+      const w = toMM(rect.w);
+      const h = toMM(rect.h);
+      code += `; Panel ${i + 1}: ${rect.name}\nG0 X${x} Y${y}\n`;
+      code += `G1 X${parseFloat(x) + parseFloat(w)} Y${y}\n`;
+      code += `G1 X${parseFloat(x) + parseFloat(w)} Y${
+        parseFloat(y) + parseFloat(h)
+      }\n`;
+      code += `G1 X${x} Y${parseFloat(y) + parseFloat(h)}\n`;
+      code += `G1 X${x} Y${y}\n`;
+    });
+    setGcode(code);
+  };
+
+  const copyGcode = () => navigator.clipboard.writeText(gcode);
+
+  const getPanelColor = (id) => {
+    const colors = [
+      "#FFD3B5",
+      "#C7CEEA",
+      "#DCEDC2",
+      "#FFD3E0",
+      "#B5EAD7",
+      "#E2F0CB",
+      "#FFDAC1",
+      "#D8E2DC",
+    ];
+    const hash = id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    return colors[hash % colors.length];
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 max-w-screen-xl mx-auto">
+      {/* LEFT SIDEBAR */}
+      <div className="space-y-4">
+        <div className="bg-white shadow p-4 rounded">
+          <h2 className="text-lg font-bold mb-2">📏 Stock Sheet ({units})</h2>
+          <input
+            type="number"
+            className="border p-2 mb-2 w-full"
+            placeholder="Width"
+            value={stockSheet.w}
+            onChange={(e) =>
+              setStockSheet({
+                ...stockSheet,
+                w: parseFloat(e.target.value) || 0,
+              })
+            }
+          />
+          <input
+            type="number"
+            className="border p-2 mb-2 w-full"
+            placeholder="Height"
+            value={stockSheet.h}
+            onChange={(e) =>
+              setStockSheet({
+                ...stockSheet,
+                h: parseFloat(e.target.value) || 0,
+              })
+            }
+          />
+        </div>
+
+        <div className="bg-white shadow p-4 rounded">
+          <h2 className="text-lg font-bold mb-2">➕ Add Panel</h2>
+          <input
+            className="border p-2 mb-1 w-full"
+            placeholder="Name"
+            value={newPanel.name}
+            onChange={(e) => setNewPanel({ ...newPanel, name: e.target.value })}
+          />
+          <input
+            className="border p-2 mb-1 w-full"
+            type="number"
+            placeholder="Qty"
+            value={newPanel.qty}
+            onChange={(e) =>
+              setNewPanel({ ...newPanel, qty: parseInt(e.target.value) || 1 })
+            }
+          />
+          <input
+            className="border p-2 mb-1 w-full"
+            type="number"
+            placeholder="Width"
+            value={newPanel.w}
+            onChange={(e) =>
+              setNewPanel({ ...newPanel, w: parseFloat(e.target.value) || 0 })
+            }
+          />
+          <input
+            className="border p-2 mb-2 w-full"
+            type="number"
+            placeholder="Height"
+            value={newPanel.h}
+            onChange={(e) =>
+              setNewPanel({ ...newPanel, h: parseFloat(e.target.value) || 0 })
+            }
+          />
+          <button
+            className="bg-blue-500 text-white px-3 py-2 rounded w-full"
+            onClick={handleAddPanel}
+          >
+            Add
+          </button>
+          {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
+        </div>
+
+        <div className="bg-white shadow p-4 rounded">
+          <h2 className="font-bold mb-2">📋 Panel List</h2>
+          {panels.length === 0 ? (
+            <p className="text-gray-500">No panels</p>
+          ) : (
+            <ul>
+              {panels.map((p) => (
+                <li key={p.id} className="flex justify-between border-b py-1">
+                  <span>
+                    {p.qty}x {p.name} ({p.w}" x {p.h}")
+                  </span>
+                  <button
+                    className="text-red-500"
+                    onClick={() => handleRemovePanel(p.id)}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* MIDDLE - CANVAS */}
+      <div className="col-span-2 space-y-4">
+        <div className="bg-white shadow rounded p-4">
+          <h2 className="text-lg font-semibold mb-3">📐 Cutting Layout</h2>
+          {result ? (
+            <Stage
+              width={stockSheet.w * SCALE + PADDING * 2}
+              height={stockSheet.h * SCALE + PADDING * 2}
+            >
+              <Layer>
+                {/* STOCK SHEET */}
+                <Rect
+                  x={PADDING}
+                  y={PADDING}
+                  width={stockSheet.w * SCALE}
+                  height={stockSheet.h * SCALE}
+                  fill="#f0f0f0"
+                  stroke="#000"
+                  strokeWidth={1}
+                />
+
+                {/* PANEL RECTS */}
+                {result.packed_rectangles.map((rect, i) => (
+                  <Rect
+                    key={rect.id + i}
+                    x={rect.x * SCALE + PADDING}
+                    y={rect.y * SCALE + PADDING}
+                    width={rect.w * SCALE}
+                    height={rect.h * SCALE}
+                    fill={getPanelColor(rect.id)}
+                    stroke={hoveredPanel === rect.id ? "#f00" : "#333"}
+                    strokeWidth={hoveredPanel === rect.id ? 2 : 1}
+                    onMouseEnter={() => setHoveredPanel(rect.id)}
+                    onMouseLeave={() => setHoveredPanel(null)}
+                  />
+                ))}
+              </Layer>
+
+              {cuttingOptions.showDimensions && (
+                <Layer>
+                  {result.packed_rectangles.map((rect, i) => (
+                    <Text
+                      key={`txt-${i}`}
+                      x={rect.x * SCALE + PADDING + 4}
+                      y={rect.y * SCALE + PADDING + 4}
+                      text={`${rect.name}\n${rect.w.toFixed(
+                        1
+                      )}" x ${rect.h.toFixed(1)}"`}
+                      fontSize={12}
+                      fill="#000"
+                    />
+                  ))}
+                </Layer>
+              )}
+            </Stage>
+          ) : (
+            <p className="text-gray-500 text-sm">Add panels to see layout</p>
+          )}
+        </div>
+
+        {statistics && (
+          <div className="bg-white shadow p-4 rounded">
+            <h2 className="text-lg font-semibold mb-2">📊 Statistics</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+              <div>
+                Efficiency: <b>{statistics.efficiency}%</b>
+              </div>
+              <div>
+                Waste: <b>{statistics.wastePercentage}%</b>
+              </div>
+              <div>
+                Total Cuts: <b>{statistics.totalCuts}</b>
+              </div>
+              <div>
+                Unplaced: <b>{statistics.unplacedPanels}</b>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {gcode && (
+          <div className="bg-white p-4 shadow rounded">
+            <h2 className="font-bold mb-2">🧾 G-Code</h2>
+            <textarea
+              className="w-full p-2 border h-48 text-xs font-mono"
+              readOnly
+              value={gcode}
+            />
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={copyGcode}
+                className="bg-green-600 text-white px-3 py-1 rounded"
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="bg-blue-600 text-white px-3 py-1 rounded"
+              >
+                Print
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
