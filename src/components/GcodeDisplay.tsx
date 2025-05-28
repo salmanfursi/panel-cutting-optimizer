@@ -26,9 +26,12 @@ export function GcodeDisplay({ optimizationResult }: GcodeDisplayProps) {
       setGcode("");
     }
   }, [optimizationResult, settings]);
+  const [copied, setCopied] = useState(false);
 
   const copyGcode = async () => {
     await navigator.clipboard.writeText(gcode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const downloadGcode = () => {
@@ -60,7 +63,7 @@ export function GcodeDisplay({ optimizationResult }: GcodeDisplayProps) {
             className="flex items-center px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
           >
             <Copy className="w-4 h-4 mr-1" />
-            Copy
+            {copied ? "Copied!" : "Copy"}
           </button>
           <button
             onClick={downloadGcode}

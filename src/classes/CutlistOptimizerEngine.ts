@@ -1,5 +1,9 @@
- 
-import type { OptimizationResult, Panel, StockSheet } from "src/types/types";
+import type {
+  OptimizationResult,
+  Panel,
+  StockSheet,
+  PackingStrategy,
+} from "src/types/types";
 import { MaxRectsBinPacker } from "./MaxRectsBinPacker";
 
 export class CutlistOptimizerEngine {
@@ -17,14 +21,21 @@ export class CutlistOptimizerEngine {
     this.allowRotation = allowRotation;
   }
 
-  optimize(panels: Panel[]): OptimizationResult {
-    const strategies = [
-      "BestShortSideFit",
-      "BestLongSideFit",
-      "BestAreaFit",
-      "BottomLeftRule",
-      "ContactPointRule",
-    ];
+  optimize(
+    panels: Panel[],
+    selectedStrategy: PackingStrategy = "Auto"
+  ): OptimizationResult {
+    // If a specific strategy is selected (not Auto), use only that strategy
+    const strategies: PackingStrategy[] =
+      selectedStrategy === "Auto"
+        ? [
+            "BestShortSideFit",
+            "BestLongSideFit",
+            "BestAreaFit",
+            "BottomLeftRule",
+            "ContactPointRule",
+          ]
+        : [selectedStrategy];
 
     let bestResult: OptimizationResult | null = null;
     let bestEfficiency = 0;
@@ -48,7 +59,7 @@ export class CutlistOptimizerEngine {
       }
     }
 
-    return bestResult || this.createEmptyResult("None");
+    return bestResult || this.createEmptyResult("Auto");
   }
 
   packWithStrategy(panels: Panel[], strategy: string): OptimizationResult {
@@ -95,8 +106,7 @@ export class CutlistOptimizerEngine {
       strategy,
     };
   }
-
-  createEmptyResult(strategy: string): OptimizationResult {
+  createEmptyResult(strategy: PackingStrategy): OptimizationResult {
     const totalArea = this.stockSheet.length * this.stockSheet.width;
     return {
       placedPanels: [],

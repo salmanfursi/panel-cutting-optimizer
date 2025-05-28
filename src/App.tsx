@@ -1,6 +1,6 @@
 import React from "react";
 import { RotateCcw, Download, Maximize } from "lucide-react";
-import { StockSheetForm } from './components/StockSheetForm';
+import { StockSheetForm } from "./components/StockSheetForm";
 import { SettingsForm } from "./components/SettingsForm";
 import { PanelList } from "./components/PanelList";
 import { Statistics } from "./components/Statistics";
@@ -24,6 +24,7 @@ class App extends React.Component {
     allowRotation: true,
     showWasteZones: true,
     showLabels: true,
+    selectedStrategy: "Auto" as PackingStrategy,
   };
 
   addPanel = () => {
@@ -96,9 +97,9 @@ class App extends React.Component {
     a.click();
     URL.revokeObjectURL(url);
   };
-
   getOptimizationResult = () => {
-    const { panels, stockSheet, kerf, allowRotation } = this.state;
+    const { panels, stockSheet, kerf, allowRotation, selectedStrategy } =
+      this.state;
     if (panels.length === 0) return null;
 
     const optimizer = new CutlistOptimizerEngine(
@@ -106,7 +107,7 @@ class App extends React.Component {
       kerf,
       allowRotation
     );
-    return optimizer.optimize(panels);
+    return optimizer.optimize(panels, selectedStrategy);
   };
 
   getStats = () => {
@@ -190,6 +191,10 @@ class App extends React.Component {
                   allowRotation={allowRotation}
                   showWasteZones={showWasteZones}
                   showLabels={showLabels}
+                  selectedStrategy={this.state.selectedStrategy}
+                  onStrategyChange={(value) =>
+                    this.setState({ selectedStrategy: value })
+                  }
                   onKerfChange={(value) => this.setState({ kerf: value })}
                   onAllowRotationChange={(value) =>
                     this.setState({ allowRotation: value })
@@ -252,11 +257,13 @@ class App extends React.Component {
                       </div>
                     )}
                   </div>
-                </div>                {/* Statistics Panel */}
+                </div>{" "}
+                {/* Statistics Panel */}
                 {stats && <Statistics stats={stats} />}
-
                 {/* G-code Display */}
-                {optimizationResult && <GcodeDisplay optimizationResult={optimizationResult} />}
+                {optimizationResult && (
+                  <GcodeDisplay optimizationResult={optimizationResult} />
+                )}
               </div>
             </div>
           </div>

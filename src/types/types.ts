@@ -34,6 +34,23 @@ export interface WasteZone {
   area: number;
 }
 
+export type PackingStrategy =
+  | "BestShortSideFit"
+  | "BestLongSideFit"
+  | "BestAreaFit"
+  | "BottomLeftRule"
+  | "ContactPointRule"
+  | "Auto";
+
+export const PACKING_STRATEGIES: PackingStrategy[] = [
+  "Auto",
+  "BestShortSideFit",
+  "BestLongSideFit",
+  "BestAreaFit",
+  "BottomLeftRule",
+  "ContactPointRule",
+];
+
 export interface OptimizationResult {
   placedPanels: PlacedPanel[];
   wasteZones: WasteZone[];
@@ -41,7 +58,7 @@ export interface OptimizationResult {
   totalArea: number;
   usedArea: number;
   wasteArea: number;
-  strategy: string;
+  strategy: PackingStrategy;
 }
 
 export interface GcodeSettings {
