@@ -1,828 +1,104 @@
-
-// import React, { useState, useEffect } from "react";
-// import { pack } from "efficient-rect-packer";
-
-// import { generateGcode } from "./utils";
-// import AddPanelForm from "./components/AddPanelForm";
-// import StockSheetForm from "./components/StockSheetForm";
-// import PanelList from "./components/PanelList";
-// import CuttingLayout from "./components/CuttingLayout";
-// import Statistics from "./components/Statistics";
-// import GcodeOutput from "./components/GcodeOutput";
-//  import type { CuttingOptions, PackingResult, Panel, StockSheet, Statistics as StatsType } from "./types";
-// import type { WasteZone } from "./utils/wasteOptimization";
-
-// export default function PanelCuttingOptimizer() {
-//   const [panels, setPanels] = useState<Panel[]>([]);
-//   const [stockSheet, setStockSheet] = useState<StockSheet>({ w: 96, h: 48 });
-//   const [result, setResult] = useState<PackingResult | null>(null);
-//   const [newPanel, setNewPanel] = useState<Panel>({ id: "", name: "", qty: 1, w: 12, h: 12 });
-//   const [units] = useState<string>("inch");
-//   const [error, setError] = useState<string>("");
-//   const [cuttingOptions, setCuttingOptions] = useState<CuttingOptions>({
-//     kerf: 0.125,
-//     respectGrain: false,
-//     showDimensions: true,
-//   });
-//   const [statistics, setStatistics] = useState<StatsType | null>(null);
-//   const [gcode, setGcode] = useState<string>("");
-//   const [wasteZones, setWasteZones] = useState<WasteZone[]>([]); // Add waste zones state
-
-//   useEffect(() => {
-//     if (panels.length > 0) {
-//       handleOptimize();
-//     } else {
-//       setResult(null);
-//       setStatistics(null);
-//     }
-//   }, [panels, stockSheet, cuttingOptions]);
-
-//   const handleAddPanel = () => {
-//     if (!newPanel.name.trim()) return setError("Panel name required");
-//     if (newPanel.qty! < 1) return setError("Minimum 1 quantity");
-//     if (newPanel.w <= 0 || newPanel.h <= 0) return setError("Panel size > 0");
-//     if (newPanel.w > stockSheet.w || newPanel.h > stockSheet.h)
-//       return setError("Panel cannot exceed stock size");
-
-//     setError("");
-//     setPanels([...panels, { ...newPanel, id: Date.now().toString() }]);
-//     setNewPanel({ id: "", name: "", qty: 1, w: 12, h: 12 });
-//   };
-
-//   const handleRemovePanel = (id: string) => {
-//     const updated = panels.filter((p) => p.id !== id);
-//     setPanels(updated);
-//   };
-
-//   const handleOptimize = async () => {
-//     // Import the optimized handler
-//     const optimizeHandler = (await import('./utils/handleOptimize')).default;
-    
-//     // Call with all required parameters
-//     optimizeHandler(
-//       panels,
-//       stockSheet,
-//       cuttingOptions,
-//       setResult,
-//       setStatistics,
-//       setGcode,
-//       setWasteZones
-//     );
-//   };
-
-//   const copyGcode = () => navigator.clipboard.writeText(gcode);
-
-//   return (
-//     <div className="flex w-full gap-4">
-//       {/* LEFT SIDEBAR */}
-//       <div className="w-1/4 bg-white shadow rounded p-4">
-//         <StockSheetForm
-//           stockSheet={stockSheet}
-//           setStockSheet={setStockSheet}
-//           units={units}
-//         />
-
-//         <AddPanelForm
-//           newPanel={newPanel}
-//           setNewPanel={setNewPanel}
-//           handleAddPanel={handleAddPanel}
-//           error={error}
-//           stockSheet={stockSheet}
-//         />
-
-//         <PanelList
-//           panels={panels}
-//           handleRemovePanel={handleRemovePanel}
-//         />
-//       </div>
-
-//       {/* MIDDLE - CANVAS */}
-//       <div className="w-2/4 bg-white shadow rounded p-4">
-//         <h2 className="text-lg font-semibold mb-3">📐 Cutting Layout</h2>
-//         <CuttingLayout
-//           result={result}
-//           stockSheet={stockSheet}
-//           cuttingOptions={cuttingOptions}
-//           wasteZones={wasteZones} // Pass waste zones to CuttingLayout
-//         />
-//       </div>
-
-//       {/* RIGHT SIDEBAR */}
-//       <div className="w-1/4 bg-white shadow rounded p-4">
-//         <Statistics statistics={statistics} />
-//         <GcodeOutput gcode={gcode} copyGcode={copyGcode} />
-//       </div>
-//     </div>
-//   );
-// }
-
-
-
-
-
-
-
-
-
-
-
-
- 
-
-import React, { useState, useCallback, useMemo } from "react";
-import {
-  Plus,
-  Trash2,
-  RotateCcw,
-  Download,
-  Settings,
-  Maximize,
-} from "lucide-react";
-
-// Types
-interface Panel {
-  id: string;
-  length: number;
-  width: number;
-  quantity: number;
-  label: string;
-  material: string;
-}
-
-interface StockSheet {
-  id: string;
-  length: number;
-  width: number;
-  material: string;
-  label: string;
-  cost?: number;
-}
-
-interface PlacedPanel {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotated: boolean;
-  originalPanel: Panel;
-}
-
-interface WasteZone {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  area: number;
-}
-
-interface OptimizationResult {
-  placedPanels: PlacedPanel[];
-  wasteZones: WasteZone[];
-  efficiency: number;
-  totalArea: number;
-  usedArea: number;
-  wasteArea: number;
-  strategy: string;
-}
-
-// MaxRects Bin Packing Algorithm
-class MaxRectsBinPacker {
-  binWidth: number;
-  binHeight: number;
-  usedRectangles: PlacedPanel[] = [];
-  freeRectangles: { x: number; y: number; width: number; height: number }[] =
-    [];
-
-  constructor(width: number, height: number) {
-    this.binWidth = width;
-    this.binHeight = height;
-    this.freeRectangles = [{ x: 0, y: 0, width, height }];
-  }
-
-  insert(
-    width: number,
-    height: number,
-    method: string,
-    panel: Panel,
-    allowRotation: boolean = true
-  ): PlacedPanel | null {
-    let newNode: any = null;
-    let bestShortSideFit = 0;
-    let bestLongSideFit = 0;
-
-    switch (method) {
-      case "BestShortSideFit":
-        newNode = this.findPositionForNewNodeBestShortSideFit(
-          width,
-          height,
-          allowRotation
-        );
-        break;
-      case "BestLongSideFit":
-        newNode = this.findPositionForNewNodeBestLongSideFit(
-          width,
-          height,
-          allowRotation
-        );
-        break;
-      case "BestAreaFit":
-        newNode = this.findPositionForNewNodeBestAreaFit(
-          width,
-          height,
-          allowRotation
-        );
-        break;
-      case "BottomLeftRule":
-        newNode = this.findPositionForNewNodeBottomLeft(
-          width,
-          height,
-          allowRotation
-        );
-        break;
-      case "ContactPointRule":
-        newNode = this.findPositionForNewNodeContactPoint(
-          width,
-          height,
-          allowRotation
-        );
-        break;
-      default:
-        newNode = this.findPositionForNewNodeBestShortSideFit(
-          width,
-          height,
-          allowRotation
-        );
-    }
-
-    if (newNode.height === 0) return null;
-
-    const placedPanel: PlacedPanel = {
-      id: `${panel.id}-${Date.now()}-${Math.random()}`,
-      x: newNode.x,
-      y: newNode.y,
-      width: newNode.width,
-      height: newNode.height,
-      rotated: newNode.rotated || false,
-      originalPanel: panel,
-    };
-
-    this.placeRectangle(newNode);
-    return placedPanel;
-  }
-
-  findPositionForNewNodeBestShortSideFit(
-    width: number,
-    height: number,
-    allowRotation: boolean
-  ) {
-    let bestNode = { x: 0, y: 0, width: 0, height: 0, rotated: false };
-    let bestShortSide = Number.MAX_VALUE;
-    let bestLongSide = Number.MAX_VALUE;
-
-    for (const rect of this.freeRectangles) {
-      // Try placing the rectangle in original orientation
-      if (rect.width >= width && rect.height >= height) {
-        const leftoverHoriz = rect.width - width;
-        const leftoverVert = rect.height - height;
-        const shortSide = Math.min(leftoverHoriz, leftoverVert);
-        const longSide = Math.max(leftoverHoriz, leftoverVert);
-
-        if (
-          shortSide < bestShortSide ||
-          (shortSide === bestShortSide && longSide < bestLongSide)
-        ) {
-          bestNode = { x: rect.x, y: rect.y, width, height, rotated: false };
-          bestShortSide = shortSide;
-          bestLongSide = longSide;
-        }
-      }
-
-      // Try placing the rectangle rotated
-      if (allowRotation && rect.width >= height && rect.height >= width) {
-        const leftoverHoriz = rect.width - height;
-        const leftoverVert = rect.height - width;
-        const shortSide = Math.min(leftoverHoriz, leftoverVert);
-        const longSide = Math.max(leftoverHoriz, leftoverVert);
-
-        if (
-          shortSide < bestShortSide ||
-          (shortSide === bestShortSide && longSide < bestLongSide)
-        ) {
-          bestNode = {
-            x: rect.x,
-            y: rect.y,
-            width: height,
-            height: width,
-            rotated: true,
-          };
-          bestShortSide = shortSide;
-          bestLongSide = longSide;
-        }
-      }
-    }
-
-    return bestNode;
-  }
-
-  findPositionForNewNodeBestLongSideFit(
-    width: number,
-    height: number,
-    allowRotation: boolean
-  ) {
-    let bestNode = { x: 0, y: 0, width: 0, height: 0, rotated: false };
-    let bestShortSide = Number.MAX_VALUE;
-    let bestLongSide = Number.MAX_VALUE;
-
-    for (const rect of this.freeRectangles) {
-      if (rect.width >= width && rect.height >= height) {
-        const leftoverHoriz = rect.width - width;
-        const leftoverVert = rect.height - height;
-        const shortSide = Math.min(leftoverHoriz, leftoverVert);
-        const longSide = Math.max(leftoverHoriz, leftoverVert);
-
-        if (
-          longSide < bestLongSide ||
-          (longSide === bestLongSide && shortSide < bestShortSide)
-        ) {
-          bestNode = { x: rect.x, y: rect.y, width, height, rotated: false };
-          bestShortSide = shortSide;
-          bestLongSide = longSide;
-        }
-      }
-
-      if (allowRotation && rect.width >= height && rect.height >= width) {
-        const leftoverHoriz = rect.width - height;
-        const leftoverVert = rect.height - width;
-        const shortSide = Math.min(leftoverHoriz, leftoverVert);
-        const longSide = Math.max(leftoverHoriz, leftoverVert);
-
-        if (
-          longSide < bestLongSide ||
-          (longSide === bestLongSide && shortSide < bestShortSide)
-        ) {
-          bestNode = {
-            x: rect.x,
-            y: rect.y,
-            width: height,
-            height: width,
-            rotated: true,
-          };
-          bestShortSide = shortSide;
-          bestLongSide = longSide;
-        }
-      }
-    }
-
-    return bestNode;
-  }
-
-  findPositionForNewNodeBestAreaFit(
-    width: number,
-    height: number,
-    allowRotation: boolean
-  ) {
-    let bestNode = { x: 0, y: 0, width: 0, height: 0, rotated: false };
-    let bestAreaFit = Number.MAX_VALUE;
-    let bestShortSideFit = Number.MAX_VALUE;
-
-    for (const rect of this.freeRectangles) {
-      const areaFit = rect.width * rect.height - width * height;
-
-      if (rect.width >= width && rect.height >= height) {
-        const leftoverHoriz = rect.width - width;
-        const leftoverVert = rect.height - height;
-        const shortSideFit = Math.min(leftoverHoriz, leftoverVert);
-
-        if (
-          areaFit < bestAreaFit ||
-          (areaFit === bestAreaFit && shortSideFit < bestShortSideFit)
-        ) {
-          bestNode = { x: rect.x, y: rect.y, width, height, rotated: false };
-          bestAreaFit = areaFit;
-          bestShortSideFit = shortSideFit;
-        }
-      }
-
-      if (allowRotation && rect.width >= height && rect.height >= width) {
-        const leftoverHoriz = rect.width - height;
-        const leftoverVert = rect.height - width;
-        const shortSideFit = Math.min(leftoverHoriz, leftoverVert);
-
-        if (
-          areaFit < bestAreaFit ||
-          (areaFit === bestAreaFit && shortSideFit < bestShortSideFit)
-        ) {
-          bestNode = {
-            x: rect.x,
-            y: rect.y,
-            width: height,
-            height: width,
-            rotated: true,
-          };
-          bestAreaFit = areaFit;
-          bestShortSideFit = shortSideFit;
-        }
-      }
-    }
-
-    return bestNode;
-  }
-
-  findPositionForNewNodeBottomLeft(
-    width: number,
-    height: number,
-    allowRotation: boolean
-  ) {
-    let bestNode = { x: 0, y: 0, width: 0, height: 0, rotated: false };
-    let bestY = Number.MAX_VALUE;
-    let bestX = Number.MAX_VALUE;
-
-    for (const rect of this.freeRectangles) {
-      if (rect.width >= width && rect.height >= height) {
-        if (rect.y < bestY || (rect.y === bestY && rect.x < bestX)) {
-          bestNode = { x: rect.x, y: rect.y, width, height, rotated: false };
-          bestY = rect.y;
-          bestX = rect.x;
-        }
-      }
-
-      if (allowRotation && rect.width >= height && rect.height >= width) {
-        if (rect.y < bestY || (rect.y === bestY && rect.x < bestX)) {
-          bestNode = {
-            x: rect.x,
-            y: rect.y,
-            width: height,
-            height: width,
-            rotated: true,
-          };
-          bestY = rect.y;
-          bestX = rect.x;
-        }
-      }
-    }
-
-    return bestNode;
-  }
-
-  findPositionForNewNodeContactPoint(
-    width: number,
-    height: number,
-    allowRotation: boolean
-  ) {
-    let bestNode = { x: 0, y: 0, width: 0, height: 0, rotated: false };
-    let bestContactRating = 0;
-
-    for (const rect of this.freeRectangles) {
-      if (rect.width >= width && rect.height >= height) {
-        const contactRating = this.contactPointRateOnRect(
-          rect.x,
-          rect.y,
-          width,
-          height
-        );
-        if (contactRating > bestContactRating) {
-          bestNode = { x: rect.x, y: rect.y, width, height, rotated: false };
-          bestContactRating = contactRating;
-        }
-      }
-
-      if (allowRotation && rect.width >= height && rect.height >= width) {
-        const contactRating = this.contactPointRateOnRect(
-          rect.x,
-          rect.y,
-          height,
-          width
-        );
-        if (contactRating > bestContactRating) {
-          bestNode = {
-            x: rect.x,
-            y: rect.y,
-            width: height,
-            height: width,
-            rotated: true,
-          };
-          bestContactRating = contactRating;
-        }
-      }
-    }
-
-    return bestNode;
-  }
-
-  contactPointRateOnRect(
-    x: number,
-    y: number,
-    width: number,
-    height: number
-  ): number {
-    let rating = 0;
-
-    if (x === 0 || x + width === this.binWidth) rating += height;
-    if (y === 0 || y + height === this.binHeight) rating += width;
-
-    for (const usedRect of this.usedRectangles) {
-      if (usedRect.x === x + width || usedRect.x + usedRect.width === x) {
-        rating += this.commonIntervalLength(
-          usedRect.y,
-          usedRect.y + usedRect.height,
-          y,
-          y + height
-        );
-      }
-      if (usedRect.y === y + height || usedRect.y + usedRect.height === y) {
-        rating += this.commonIntervalLength(
-          usedRect.x,
-          usedRect.x + usedRect.width,
-          x,
-          x + width
-        );
-      }
-    }
-
-    return rating;
-  }
-
-  commonIntervalLength(
-    i1start: number,
-    i1end: number,
-    i2start: number,
-    i2end: number
-  ): number {
-    if (i1end < i2start || i2end < i1start) return 0;
-    return Math.min(i1end, i2end) - Math.max(i1start, i2start);
-  }
-
-  placeRectangle(node: any) {
-    let numRectanglesToProcess = this.freeRectangles.length;
-    for (let i = 0; i < numRectanglesToProcess; ++i) {
-      if (this.splitFreeNode(this.freeRectangles[i], node)) {
-        this.freeRectangles.splice(i, 1);
-        --i;
-        --numRectanglesToProcess;
-      }
-    }
-
-    this.pruneFreeList();
-    this.usedRectangles.push(node);
-  }
-
-  splitFreeNode(freeNode: any, usedNode: any): boolean {
-    if (
-      usedNode.x >= freeNode.x + freeNode.width ||
-      usedNode.x + usedNode.width <= freeNode.x ||
-      usedNode.y >= freeNode.y + freeNode.height ||
-      usedNode.y + usedNode.height <= freeNode.y
-    ) {
-      return false;
-    }
-
-    if (
-      usedNode.x < freeNode.x + freeNode.width &&
-      usedNode.x + usedNode.width > freeNode.x
-    ) {
-      if (
-        usedNode.y > freeNode.y &&
-        usedNode.y < freeNode.y + freeNode.height
-      ) {
-        const newNode = { ...freeNode };
-        newNode.height = usedNode.y - newNode.y;
-        this.freeRectangles.push(newNode);
-      }
-
-      if (usedNode.y + usedNode.height < freeNode.y + freeNode.height) {
-        const newNode = { ...freeNode };
-        newNode.y = usedNode.y + usedNode.height;
-        newNode.height =
-          freeNode.y + freeNode.height - (usedNode.y + usedNode.height);
-        this.freeRectangles.push(newNode);
-      }
-    }
-
-    if (
-      usedNode.y < freeNode.y + freeNode.height &&
-      usedNode.y + usedNode.height > freeNode.y
-    ) {
-      if (usedNode.x > freeNode.x && usedNode.x < freeNode.x + freeNode.width) {
-        const newNode = { ...freeNode };
-        newNode.width = usedNode.x - newNode.x;
-        this.freeRectangles.push(newNode);
-      }
-
-      if (usedNode.x + usedNode.width < freeNode.x + freeNode.width) {
-        const newNode = { ...freeNode };
-        newNode.x = usedNode.x + usedNode.width;
-        newNode.width =
-          freeNode.x + freeNode.width - (usedNode.x + usedNode.width);
-        this.freeRectangles.push(newNode);
-      }
-    }
-
-    return true;
-  }
-
-  pruneFreeList() {
-    for (let i = 0; i < this.freeRectangles.length; ++i) {
-      for (let j = i + 1; j < this.freeRectangles.length; ++j) {
-        if (
-          this.isContainedIn(this.freeRectangles[i], this.freeRectangles[j])
-        ) {
-          this.freeRectangles.splice(i, 1);
-          --i;
-          break;
-        }
-        if (
-          this.isContainedIn(this.freeRectangles[j], this.freeRectangles[i])
-        ) {
-          this.freeRectangles.splice(j, 1);
-          --j;
-        }
-      }
-    }
-  }
-
-  isContainedIn(a: any, b: any): boolean {
-    return (
-      a.x >= b.x &&
-      a.y >= b.y &&
-      a.x + a.width <= b.x + b.width &&
-      a.y + a.height <= b.y + b.height
-    );
-  }
-
-  findWasteZones(): WasteZone[] {
-    return this.freeRectangles
-      .map((rect) => ({
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        area: rect.width * rect.height,
-      }))
-      .filter((zone) => zone.area > 0);
-  }
-}
-
-// Cutlist Optimizer Class
-class CutlistOptimizerEngine {
-  stockSheet: StockSheet;
-  kerf: number;
-  allowRotation: boolean;
-
-  constructor(
-    stockSheet: StockSheet,
-    kerf: number = 0.125,
-    allowRotation: boolean = true
-  ) {
-    this.stockSheet = stockSheet;
-    this.kerf = kerf;
-    this.allowRotation = allowRotation;
-  }
-
-  optimize(panels: Panel[]): OptimizationResult {
-    const strategies = [
-      "BestShortSideFit",
-      "BestLongSideFit",
-      "BestAreaFit",
-      "BottomLeftRule",
-      "ContactPointRule",
-    ];
-
-    let bestResult: OptimizationResult | null = null;
-    let bestEfficiency = 0;
-
-    // Expand panels by quantity
-    const expandedPanels: Panel[] = [];
-    panels.forEach((panel) => {
-      for (let i = 0; i < panel.quantity; i++) {
-        expandedPanels.push({ ...panel, id: `${panel.id}-${i}`, quantity: 1 });
-      }
-    });
-
-    // Sort panels by area (largest first) for better packing
-    expandedPanels.sort((a, b) => b.length * b.width - a.length * a.width);
-
-    for (const strategy of strategies) {
-      const result = this.packWithStrategy(expandedPanels, strategy);
-      if (result.efficiency > bestEfficiency) {
-        bestEfficiency = result.efficiency;
-        bestResult = result;
-      }
-    }
-
-    return bestResult || this.createEmptyResult("None");
-  }
-
-  packWithStrategy(panels: Panel[], strategy: string): OptimizationResult {
-    const packer = new MaxRectsBinPacker(
-      this.stockSheet.length - this.kerf,
-      this.stockSheet.width - this.kerf
-    );
-
-    const placedPanels: PlacedPanel[] = [];
-
-    for (const panel of panels) {
-      const adjustedLength = panel.length + this.kerf;
-      const adjustedWidth = panel.width + this.kerf;
-
-      const placed = packer.insert(
-        adjustedLength,
-        adjustedWidth,
-        strategy,
-        panel,
-        this.allowRotation
-      );
-
-      if (placed) {
-        placedPanels.push(placed);
-      }
-    }
-
-    const wasteZones = packer.findWasteZones();
-    const totalArea = this.stockSheet.length * this.stockSheet.width;
-    const usedArea = placedPanels.reduce(
-      (sum, panel) => sum + panel.width * panel.height,
-      0
-    );
-    const wasteArea = totalArea - usedArea;
-    const efficiency = (usedArea / totalArea) * 100;
-
-    return {
-      placedPanels,
-      wasteZones,
-      efficiency,
-      totalArea,
-      usedArea,
-      wasteArea,
-      strategy,
-    };
-  }
-
-  createEmptyResult(strategy: string): OptimizationResult {
-    const totalArea = this.stockSheet.length * this.stockSheet.width;
-    return {
-      placedPanels: [],
-      wasteZones: [
-        {
-          x: 0,
-          y: 0,
-          width: this.stockSheet.length,
-          height: this.stockSheet.width,
-          area: totalArea,
-        },
-      ],
-      efficiency: 0,
-      totalArea,
-      usedArea: 0,
-      wasteArea: totalArea,
-      strategy,
-    };
-  }
-}
-
-// Main Component
-export default function CutlistOptimizer() {
-  const [panels, setPanels] = useState<Panel[]>([]);
-  const [stockSheet, setStockSheet] = useState<StockSheet>({
-    id: "1",
-    length: 96,
-    width: 48,
-    material: "Plywood",
-    label: "Standard 4x8",
-    cost: 50,
-  });
-  const [kerf, setKerf] = useState(0.125);
-  const [allowRotation, setAllowRotation] = useState(true);
-  const [showWasteZones, setShowWasteZones] = useState(true);
-  const [showLabels, setShowLabels] = useState(true);
-
-  // Add panel
-  const addPanel = useCallback(() => {
+import React from "react";
+import { RotateCcw, Download, Maximize } from "lucide-react";
+import { StockSheetForm } from './components/StockSheetForm';
+import { SettingsForm } from "./components/SettingsForm";
+import { PanelList } from "./components/PanelList";
+import { Statistics } from "./components/Statistics";
+import { CuttingLayoutVisualization } from "./components/CuttingLayoutVisualization";
+import { GcodeDisplay } from "./components/GcodeDisplay";
+import { CutlistOptimizerEngine } from "./classes/CutlistOptimizerEngine";
+import type { Panel, StockSheet } from "./types/types";
+
+class App extends React.Component {
+  state = {
+    panels: [] as Panel[],
+    stockSheet: {
+      id: "1",
+      length: 96,
+      width: 48,
+      material: "Plywood",
+      label: "Standard 4x8",
+      cost: 50,
+    } as StockSheet,
+    kerf: 0.125,
+    allowRotation: true,
+    showWasteZones: true,
+    showLabels: true,
+  };
+
+  addPanel = () => {
     const newPanel: Panel = {
       id: `panel-${Date.now()}`,
       length: 24,
       width: 12,
       quantity: 1,
-      label: `Panel ${panels.length + 1}`,
-      material: stockSheet.material,
+      label: `Panel ${this.state.panels.length + 1}`,
+      material: this.state.stockSheet.material,
     };
-    setPanels((prev) => [...prev, newPanel]);
-  }, [panels.length, stockSheet.material]);
+    this.setState((prev) => ({
+      panels: [...prev.panels, newPanel],
+    }));
+  };
 
-  // Update panel
-  const updatePanel = useCallback((id: string, updates: Partial<Panel>) => {
-    setPanels((prev) =>
-      prev.map((panel) => (panel.id === id ? { ...panel, ...updates } : panel))
-    );
-  }, []);
+  updatePanel = (id: string, updates: Partial<Panel>) => {
+    this.setState((prev) => ({
+      panels: prev.panels.map((panel) =>
+        panel.id === id ? { ...panel, ...updates } : panel
+      ),
+    }));
+  };
 
-  // Remove panel
-  const removePanel = useCallback((id: string) => {
-    setPanels((prev) => prev.filter((panel) => panel.id !== id));
-  }, []);
+  removePanel = (id: string) => {
+    this.setState((prev) => ({
+      panels: prev.panels.filter((panel) => panel.id !== id),
+    }));
+  };
 
-  // Optimize layout
-  const optimizationResult = useMemo(() => {
+  updateStockSheet = (updates: Partial<StockSheet>) => {
+    this.setState((prev) => ({
+      stockSheet: { ...prev.stockSheet, ...updates },
+    }));
+  };
+
+  resetAll = () => {
+    this.setState({
+      panels: [],
+    });
+  };
+
+  exportData = () => {
+    const { stockSheet, panels } = this.state;
+    const optimizationResult = this.getOptimizationResult();
+    const stats = this.getStats();
+
+    if (!optimizationResult) return;
+
+    const data = {
+      stockSheet,
+      panels,
+      result: optimizationResult,
+      stats,
+      settings: {
+        kerf: this.state.kerf,
+        allowRotation: this.state.allowRotation,
+        showWasteZones: this.state.showWasteZones,
+        showLabels: this.state.showLabels,
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cutlist-${new Date().toISOString().split("T")[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  getOptimizationResult = () => {
+    const { panels, stockSheet, kerf, allowRotation } = this.state;
     if (panels.length === 0) return null;
 
     const optimizer = new CutlistOptimizerEngine(
@@ -831,10 +107,11 @@ export default function CutlistOptimizer() {
       allowRotation
     );
     return optimizer.optimize(panels);
-  }, [panels, stockSheet, kerf, allowRotation]);
+  };
 
-  // Calculate statistics
-  const stats = useMemo(() => {
+  getStats = () => {
+    const { panels, stockSheet } = this.state;
+    const optimizationResult = this.getOptimizationResult();
     if (!optimizationResult) return null;
 
     const totalPanels = panels.reduce((sum, p) => sum + p.quantity, 0);
@@ -859,622 +136,134 @@ export default function CutlistOptimizer() {
         (optimizationResult.wasteArea / optimizationResult.totalArea) *
         (stockSheet.cost || 0),
     };
-  }, [optimizationResult, panels, stockSheet.cost]);
-
-  // Reset all
-  const resetAll = useCallback(() => {
-    setPanels([]);
-  }, []);
-
-  // Export data
-  const exportData = useCallback(() => {
-    if (!optimizationResult) return;
-
-    const data = {
-      stockSheet,
-      panels,
-      result: optimizationResult,
-      stats,
-      settings: { kerf, allowRotation, showWasteZones, showLabels },
-    };
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `cutlist-${new Date().toISOString().split("T")[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [
-    optimizationResult,
-    stockSheet,
-    panels,
-    stats,
-    kerf,
-    allowRotation,
-    showWasteZones,
-    showLabels,
-  ]);
-
-  return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-3xl font-bold text-gray-900">
-              Professional Cutlist Optimizer
-            </h1>
-            <div className="flex space-x-2">
-              <button
-                onClick={resetAll}
-                className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Reset
-              </button>
-              <button
-                onClick={exportData}
-                disabled={!optimizationResult}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Panel - Inputs */}
-            <div className="space-y-6">
-              {/* Stock Sheet */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-lg font-semibold mb-4 text-gray-800">
-                  Stock Sheet
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Length
-                    </label>
-                    <input
-                      type="number"
-                      value={stockSheet.length}
-                      onChange={(e) =>
-                        setStockSheet((prev) => ({
-                          ...prev,
-                          length: Number(e.target.value),
-                        }))
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Width
-                    </label>
-                    <input
-                      type="number"
-                      value={stockSheet.width}
-                      onChange={(e) =>
-                        setStockSheet((prev) => ({
-                          ...prev,
-                          width: Number(e.target.value),
-                        }))
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Material
-                    </label>
-                    <input
-                      type="text"
-                      value={stockSheet.material}
-                      onChange={(e) =>
-                        setStockSheet((prev) => ({
-                          ...prev,
-                          material: e.target.value,
-                        }))
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Cost ($)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={stockSheet.cost || 0}
-                      onChange={(e) =>
-                        setStockSheet((prev) => ({
-                          ...prev,
-                          cost: Number(e.target.value),
-                        }))
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Settings */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-lg font-semibold mb-4 text-gray-800 flex items-center">
-                  <Settings className="w-5 h-5 mr-2" />
-                  Settings
-                </h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Kerf (Blade Width)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={kerf}
-                      onChange={(e) => setKerf(Number(e.target.value))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={allowRotation}
-                        onChange={(e) => setAllowRotation(e.target.checked)}
-                        className="mr-2"
-                      />
-                      Allow panel rotation
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={showWasteZones}
-                        onChange={(e) => setShowWasteZones(e.target.checked)}
-                        className="mr-2"
-                      />
-                      Show waste zones
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={showLabels}
-                        onChange={(e) => setShowLabels(e.target.checked)}
-                        className="mr-2"
-                      />
-                      Show panel labels
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Panels */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-800">
-                    Panels ({panels.length})
-                  </h3>
-                  <button
-                    onClick={addPanel}
-                    className="flex items-center px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Add Panel
-                  </button>
-                </div>
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {panels.map((panel) => (
-                    <div
-                      key={panel.id}
-                      className="bg-white rounded-md p-3 border border-gray-200"
-                    >
-                      <div className="grid grid-cols-3 gap-2 mb-2">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600">
-                            Length
-                          </label>
-                          <input
-                            type="number"
-                            value={panel.length}
-                            onChange={(e) =>
-                              updatePanel(panel.id, {
-                                length: Number(e.target.value),
-                              })
-                            }
-                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600">
-                            Width
-                          </label>
-                          <input
-                            type="number"
-                            value={panel.width}
-                            onChange={(e) =>
-                              updatePanel(panel.id, {
-                                width: Number(e.target.value),
-                              })
-                            }
-                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600">
-                            Qty
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={panel.quantity}
-                            onChange={(e) =>
-                              updatePanel(panel.id, {
-                                quantity: Number(e.target.value),
-                              })
-                            }
-                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <input
-                          type="text"
-                          value={panel.label}
-                          onChange={(e) =>
-                            updatePanel(panel.id, { label: e.target.value })
-                          }
-                          placeholder="Panel label"
-                          className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 mr-2"
-                        />
-                        <button
-                          onClick={() => removePanel(panel.id)}
-                          className="p-1 text-red-600 hover:text-red-800 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {panels.length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <p>No panels added yet.</p>
-                      <p className="text-sm">
-                        Click "Add Panel" to get started.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Middle Panel - Visualization */}
-            <div className="lg:col-span-2">
-              <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-800">
-                    Cutting Layout
-                  </h3>
-                  {stats && (
-                    <div className="flex items-center space-x-4 text-sm">
-                      <span className="text-gray-600">
-                        Efficiency:{" "}
-                        <span className="font-semibold text-green-600">
-                          {stats.efficiency.toFixed(1)}%
-                        </span>
-                      </span>
-                      <span className="text-gray-600">
-                        Strategy:{" "}
-                        <span className="font-semibold text-blue-600">
-                          {stats.strategy}
-                        </span>
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="relative bg-gray-100 rounded-lg p-4 min-h-96">
-                  {optimizationResult ? (
-                    <CuttingLayoutVisualization
-                      result={optimizationResult}
-                      stockSheet={stockSheet}
-                      showWasteZones={showWasteZones}
-                      showLabels={showLabels}
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-96 text-gray-500">
-                      <div className="text-center">
-                        <Maximize className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                        <p>Add panels to see cutting layout</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Statistics Panel */}
-              {stats && (
-                <div className="mt-6 bg-white rounded-lg border border-gray-200 p-4">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-4">
-                    Optimization Statistics
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-blue-50 rounded-lg p-3 text-center">
-                      <div className="text-2xl font-bold text-blue-600">
-                        {stats.efficiency.toFixed(1)}%
-                      </div>
-                      <div className="text-sm text-gray-600">Efficiency</div>
-                    </div>
-                    <div className="bg-green-50 rounded-lg p-3 text-center">
-                      <div className="text-2xl font-bold text-green-600">
-                        {stats.placedPanels}
-                      </div>
-                      <div className="text-sm text-gray-600">Panels Placed</div>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-3 text-center">
-                      <div className="text-2xl font-bold text-orange-600">
-                        {stats.reusableWaste}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        Reusable Waste
-                      </div>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-3 text-center">
-                      <div className="text-2xl font-bold text-red-600">
-                        ${stats.wasteValue.toFixed(2)}
-                      </div>
-                      <div className="text-sm text-gray-600">Waste Value</div>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Total Panels:</span>
-                        <span className="font-semibold">
-                          {stats.totalPanels}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">
-                          Optimization Strategy:
-                        </span>
-                        <span className="font-semibold">{stats.strategy}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Material Cost:</span>
-                        <span className="font-semibold">
-                          ${stats.materialCost.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">
-                          Largest Waste Zone:
-                        </span>
-                        <span className="font-semibold">
-                          {stats.largestWaste.width.toFixed(1)}" ×{" "}
-                          {stats.largestWaste.height.toFixed(1)}"
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Waste Area:</span>
-                        <span className="font-semibold">
-                          {stats.largestWaste.area.toFixed(1)} sq in
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Savings:</span>
-                        <span className="font-semibold text-green-600">
-                          $
-                          {(
-                            stats.materialCost * (stats.efficiency / 100) -
-                            stats.materialCost * 0.75
-                          ).toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Cutting Layout Visualization Component
-function CuttingLayoutVisualization({
-  result,
-  stockSheet,
-  showWasteZones,
-  showLabels,
-}: {
-  result: OptimizationResult;
-  stockSheet: StockSheet;
-  showWasteZones: boolean;
-  showLabels: boolean;
-}) {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = React.useState({
-    width: 600,
-    height: 400,
-  });
-
-  React.useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const { clientWidth, clientHeight } = containerRef.current;
-        setDimensions({ width: clientWidth - 20, height: clientHeight - 20 });
-      }
-    };
-
-    updateDimensions();
-    window.addEventListener("resize", updateDimensions);
-    return () => window.removeEventListener("resize", updateDimensions);
-  }, []);
-
-  const scale =
-    Math.min(
-      dimensions.width / stockSheet.length,
-      dimensions.height / stockSheet.width
-    ) * 0.9;
-
-  const scaledWidth = stockSheet.length * scale;
-  const scaledHeight = stockSheet.width * scale;
-
-  // Generate colors for panels
-  const getRandomColor = (seed: string) => {
-    let hash = 0;
-    for (let i = 0; i < seed.length; i++) {
-      hash = seed.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const hue = Math.abs(hash % 360);
-    return `hsl(${hue}, 70%, 85%)`;
   };
 
-  return (
-    <div
-      ref={containerRef}
-      className="w-full h-full flex items-center justify-center"
-    >
-      <div
-        className="relative"
-        style={{ width: scaledWidth, height: scaledHeight }}
-      >
-        {/* Stock sheet background */}
-        <div
-          className="absolute border-4 border-gray-800 bg-white rounded-lg shadow-lg"
-          style={{ width: scaledWidth, height: scaledHeight }}
-        >
-          {/* Grid lines */}
-          <svg
-            className="absolute inset-0 w-full h-full"
-            style={{ pointerEvents: "none" }}
-          >
-            {/* Vertical grid lines every 12 inches */}
-            {Array.from(
-              { length: Math.floor(stockSheet.length / 12) + 1 },
-              (_, i) => (
-                <line
-                  key={`v-${i}`}
-                  x1={i * 12 * scale}
-                  y1={0}
-                  x2={i * 12 * scale}
-                  y2={scaledHeight}
-                  stroke="#e5e7eb"
-                  strokeWidth="1"
-                  strokeDasharray="2,2"
-                />
-              )
-            )}
-            {/* Horizontal grid lines every 12 inches */}
-            {Array.from(
-              { length: Math.floor(stockSheet.width / 12) + 1 },
-              (_, i) => (
-                <line
-                  key={`h-${i}`}
-                  x1={0}
-                  y1={i * 12 * scale}
-                  x2={scaledWidth}
-                  y2={i * 12 * scale}
-                  stroke="#e5e7eb"
-                  strokeWidth="1"
-                  strokeDasharray="2,2"
-                />
-              )
-            )}
-          </svg>
+  render() {
+    const {
+      stockSheet,
+      panels,
+      kerf,
+      allowRotation,
+      showWasteZones,
+      showLabels,
+    } = this.state;
+    const optimizationResult = this.getOptimizationResult();
+    const stats = this.getStats();
 
-          {/* Waste zones */}
-          {showWasteZones &&
-            result.wasteZones.map((zone, index) => (
-              <div
-                key={`waste-${index}`}
-                className="absolute bg-red-200 border border-red-400 opacity-60"
-                style={{
-                  left: zone.x * scale,
-                  top: zone.y * scale,
-                  width: zone.width * scale,
-                  height: zone.height * scale,
-                }}
-              >
-                {zone.width * scale > 30 && zone.height * scale > 20 && (
-                  <div className="absolute inset-0 flex items-center justify-center text-xs text-red-700 font-medium">
-                    <div className="text-center">
-                      <div>{zone.width.toFixed(1)}"</div>
-                      <div>×</div>
-                      <div>{zone.height.toFixed(1)}"</div>
-                    </div>
-                  </div>
-                )}
+    return (
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-3xl font-bold text-gray-900">
+                Professional Cutlist Optimizer
+              </h1>
+              <div className="flex space-x-2">
+                <button
+                  onClick={this.resetAll}
+                  className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Reset
+                </button>
+                <button
+                  onClick={this.exportData}
+                  disabled={!optimizationResult}
+                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </button>
               </div>
-            ))}
-
-          {/* Placed panels */}
-          {result.placedPanels.map((panel, index) => (
-            <div
-              key={panel.id}
-              className="absolute border-2 border-gray-600 rounded shadow-sm"
-              style={{
-                left: panel.x * scale,
-                top: panel.y * scale,
-                width: panel.width * scale,
-                height: panel.height * scale,
-                backgroundColor: getRandomColor(panel.originalPanel.label),
-              }}
-            >
-              {/* Rotation indicator */}
-              {panel.rotated && (
-                <div className="absolute top-1 right-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
-                  <div className="w-1 h-1 bg-white rounded-full"></div>
-                </div>
-              )}
-
-              {/* Panel label and dimensions */}
-              {showLabels &&
-                panel.width * scale > 40 &&
-                panel.height * scale > 30 && (
-                  <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-800 font-medium">
-                    <div className="text-center">
-                      <div className="font-semibold">
-                        {panel.originalPanel.label}
-                      </div>
-                      <div className="text-gray-600">
-                        {panel.originalPanel.length}" ×{" "}
-                        {panel.originalPanel.width}"
-                      </div>
-                      {panel.rotated && (
-                        <div className="text-blue-600 text-xs">Rotated</div>
-                      )}
-                    </div>
-                  </div>
-                )}
             </div>
-          ))}
 
-          {/* Dimensions */}
-          <div className="absolute -top-6 left-0 text-sm font-medium text-gray-700">
-            {stockSheet.length}"
-          </div>
-          <div
-            className="absolute -left-8 top-0 text-sm font-medium text-gray-700"
-            style={{
-              transform: "rotate(-90deg)",
-              transformOrigin: "center",
-              marginTop: scaledHeight / 2 - 10,
-            }}
-          >
-            {stockSheet.width}"
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left Panel - Inputs */}
+              <div className="space-y-6">
+                <StockSheetForm
+                  stockSheet={stockSheet}
+                  onUpdate={this.updateStockSheet}
+                />
+
+                <SettingsForm
+                  kerf={kerf}
+                  allowRotation={allowRotation}
+                  showWasteZones={showWasteZones}
+                  showLabels={showLabels}
+                  onKerfChange={(value) => this.setState({ kerf: value })}
+                  onAllowRotationChange={(value) =>
+                    this.setState({ allowRotation: value })
+                  }
+                  onShowWasteZonesChange={(value) =>
+                    this.setState({ showWasteZones: value })
+                  }
+                  onShowLabelsChange={(value) =>
+                    this.setState({ showLabels: value })
+                  }
+                />
+
+                <PanelList
+                  panels={panels}
+                  onAddPanel={this.addPanel}
+                  onUpdatePanel={this.updatePanel}
+                  onRemovePanel={this.removePanel}
+                />
+              </div>
+
+              {/* Middle Panel - Visualization */}
+              <div className="lg:col-span-2">
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      Cutting Layout
+                    </h3>
+                    {stats && (
+                      <div className="flex items-center space-x-4 text-sm">
+                        <span className="text-gray-600">
+                          Efficiency:{" "}
+                          <span className="font-semibold text-green-600">
+                            {stats.efficiency.toFixed(1)}%
+                          </span>
+                        </span>
+                        <span className="text-gray-600">
+                          Strategy:{" "}
+                          <span className="font-semibold text-blue-600">
+                            {stats.strategy}
+                          </span>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="relative bg-gray-100 rounded-lg p-4 min-h-96">
+                    {optimizationResult ? (
+                      <CuttingLayoutVisualization
+                        result={optimizationResult}
+                        stockSheet={stockSheet}
+                        showWasteZones={showWasteZones}
+                        showLabels={showLabels}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-96 text-gray-500">
+                        <div className="text-center">
+                          <Maximize className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                          <p>Add panels to see cutting layout</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>                {/* Statistics Panel */}
+                {stats && <Statistics stats={stats} />}
+
+                {/* G-code Display */}
+                {optimizationResult && <GcodeDisplay optimizationResult={optimizationResult} />}
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 }
+
+export default App;
