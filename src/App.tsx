@@ -7,8 +7,8 @@ import { Statistics } from "./components/Statistics";
 import { CuttingLayoutVisualization } from "./components/CuttingLayoutVisualization";
 import { GcodeDisplay } from "./components/GcodeDisplay";
 import { CutlistOptimizerEngine } from "./classes/CutlistOptimizerEngine";
-import type { Panel, StockSheet } from "./types/types";
-
+import type { PackingStrategy, Panel, StockSheet } from "types/types";
+ 
 class App extends React.Component {
   state = {
     panels: [] as Panel[],
