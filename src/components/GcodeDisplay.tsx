@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Settings, Copy, Download } from "lucide-react";
-import { GcodeGenerator } from "../classes/GcodeGenerator";
-import type { OptimizationResult } from "src/types/types";
+ import type { OptimizationResult } from "/types/types";
+import { createGcodeGenerator } from "../classes/GcodeGenerator";
 
 interface GcodeDisplayProps {
   optimizationResult: OptimizationResult | null;
@@ -20,7 +20,7 @@ export function GcodeDisplay({ optimizationResult }: GcodeDisplayProps) {
 
   useEffect(() => {
     if (optimizationResult) {
-      const generator = new GcodeGenerator(settings);
+      const generator = createGcodeGenerator(settings);
       setGcode(generator.generateGcode(optimizationResult));
     } else {
       setGcode("");
